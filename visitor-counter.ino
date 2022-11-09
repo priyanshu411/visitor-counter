@@ -35,8 +35,8 @@ void setup() {
 }
 
 void loop() {
-  //valSensor = getSensorData();
-  valSensor =random(1, 11);
+  valSensor = getSensorData(); //get data of sensor
+
   String getData = "GET /update?api_key=" + API + "&" + field + "=" + String(valSensor);
   sendCommand("AT+CIPMUX=1", 5, "OK");
   sendCommand("AT+CIPSTART=0,\"TCP\",\"" + HOST + "\"," + PORT, 15, "OK");
