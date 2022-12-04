@@ -1,100 +1,140 @@
-#include <SoftwareSerial.h>
 
-#define echoPin 2
-#define trigPin 3
-#define RX 4
-#define TX 5
-// variable for sensor
-long duration;
-int distance;
-int count = 0;
-//variable for wifi
-String AP = "hello";              // AP NAME
-String PASS = "hello@hello";      // AP PASSWORD
-String API = "6NVT59OJR1YMLAN4";  // Write API KEY
-String HOST = "api.thingspeak.com";
-String PORT = "80";
-String field = "field1";
-int countTrueCommand;
-int countTimeCommand;
-boolean found = false;
-long valSensor = 1;
-SoftwareSerial esp8266(RX, TX);
+#include <WiFi.h>
+#include <ThingSpeak.h> // always include thingspeak header file after other header files and custom macros
+
+#define SECRET_SSID "Wokwi-GUEST"    // replace with your WiFi network name
+#define SECRET_PASS "" // replace with your WiFi password
+
+#define SECRET_CH_ID 1917824 // replace 0000000 with your channel number
+#define SECRET_WRITE_APIKEY "M1ST8LURDIJYYWKN" // replace XYZ with your channel write API Key
+
+char ssid[] = SECRET_SSID;   // your network SSID (name)
+char pass[] = SECRET_PASS;   // your network password
+int keyIndex = 0;            // your network key Index number (needed only for WEP)
+WiFiClient  client;
+unsigned long myChannelNumber = SECRET_CH_ID;
+const char * myWriteAPIKey = SECRET_WRITE_APIKEY;
+
+const int TRIG_PIN_IN = 12;
+const int ECHO_PIN_IN = 14;
+
+const int TRIG_PIN_OUT = 5;
+const int ECHO_PIN_OUT = 4;
+long totalVisitors, countIn, countOut;
 
 
-void setup() {
-  Serial.begin(9600);
-  //confi for sensor
-  pinMode(trigPin, OUTPUT);
-  pinMode(echoPin, INPUT);
-  //confi for wifi
-  esp8266.begin(115200);
-  sendCommand("AT", 5, "OK");
-  sendCommand("AT+CWMODE=1", 5, "OK");
-  sendCommand("AT+CWJAP=\"" + AP + "\",\"" + PASS + "\"", 20, "OK");
+void setup()
+{
+  setSensorPin();
+  Serial.begin(115200);  //Initialize serial
+  while (!Serial) {
+    ; // wait for serial port to connect. Needed for Leonardo native USB port only
+  }
+  WiFi.mode(WIFI_STA);
+  ThingSpeak.begin(client);  // Initialize ThingSpeak
 }
 
-void loop() {
-  valSensor = getSensorData(); //get data of sensor
+void loop()
+{
+  // Connect or reconnect to WiFi
+  if (WiFi.status() != WL_CONNECTED)
+  {
+    Serial.print("Attempting to connect to SSID: ");
+    Serial.println(SECRET_SSID);
+    while (WiFi.status() != WL_CONNECTED)
+    {
+      WiFi.begin(ssid, pass); // Connect to WPA/WPA2 network. Change this  line if using open or WEP network
+      Serial.print(".");
+      delay(5000);
+    }
+    Serial.println("\nConnected.");
+  }
 
-  String getData = "GET /update?api_key=" + API + "&" + field + "=" + String(valSensor);
-  sendCommand("AT+CIPMUX=1", 5, "OK");
-  sendCommand("AT+CIPSTART=0,\"TCP\",\"" + HOST + "\"," + PORT, 15, "OK");
-  sendCommand("AT+CIPSEND=0," + String(getData.length() + 4), 4, ">");
-  esp8266.println(getData);
-  delay(1500);
-  countTrueCommand++;
-  sendCommand("AT+CIPCLOSE=0", 5, "OK");
+  if (getSensorDataIn()) {
+    countIn++;
+  }
+  Serial.println("In :" + String(countIn));
+  delay(2000);
+
+  if (getSensorDataOut()) {
+    if (countIn > 0) {
+      totalVisitors++;
+      countIn--;
+    }
+    Serial.println("total visitors" + String(totalVisitors));
+    Serial.println("In :" + String(countIn));
+    digitalWrite(13, HIGH);
+    tone(13, 200, 1000);
+    // Write to ThingSpeak. There are up to 8 fields in a channel, allowing you to store up to 8 different
+    // pieces of information in a channel.  Here, we write to field 1.
+    int x = ThingSpeak.writeField(myChannelNumber, 1, totalVisitors, myWriteAPIKey);
+    if (x == 200)
+    {
+      Serial.println("Channel update successful.");
+      totalVisitors = 0;
+    }
+    else
+    {
+      Serial.println("Problem updating channel. HTTP error code " + String(x));
+    }
+    // Wait 7 seconds to update the channel again
+  }
+  delay(2000);
+  digitalWrite(13, LOW);
+  delay(1000);
 }
 
-int getSensorData() {
+// setup sensor pin
+void setSensorPin() {
+  pinMode(13, OUTPUT); //buzzer and led
+  pinMode(TRIG_PIN_IN, OUTPUT); // Sets the trigPin as an OUTPUT
+  pinMode(ECHO_PIN_IN, INPUT);
+
+  pinMode(TRIG_PIN_OUT, OUTPUT); // Sets the trigPin as an OUTPUT
+  pinMode(ECHO_PIN_OUT, INPUT);
+}
+// get sensor data for in
+boolean getSensorDataIn() {
   // Clears the trigPin condition
-  digitalWrite(trigPin, LOW);
+  digitalWrite(TRIG_PIN_IN, LOW);
   delayMicroseconds(2);
   // Sets the trigPin HIGH (ACTIVE) for 10 microseconds
-  digitalWrite(trigPin, HIGH);
+  digitalWrite(TRIG_PIN_IN, HIGH);
   delayMicroseconds(10);
-  digitalWrite(trigPin, LOW);
+  digitalWrite(TRIG_PIN_IN, LOW);
   // Reads the echoPin, returns the sound wave travel time in microseconds
-  duration = pulseIn(echoPin, HIGH);
+  int duration = pulseIn(ECHO_PIN_IN, HIGH);
   // Calculating the distance
-  distance = duration * 0.034 / 2;  // Speed of sound wave divided by 2 (go and back)
+  int distanceCm = duration * 0.034 / 2; // Speed of sound wave divided by 2 (go and back)
   // Displays the distance on the Serial Monitor
-  if (distance > 0 && distance < 10) {
-    count++;
-    Serial.println("total visitors........."); 
-    Serial.println(count); 
+  // Serial.print("Distance in: ");
+  // Serial.print(distanceCm);
+  // Serial.println(" cm");
+  if (distanceCm > 0 && distanceCm < 50 ) {
+    return true;
   }
-  return(count);
+  return false;
 }
 
-void sendCommand(String command, int maxTime, char readReplay[]) {
-  Serial.print(countTrueCommand);
-  Serial.print(". at command => ");
-  Serial.print(command);
-  Serial.print(" ");
-  while (countTimeCommand < (maxTime * 1)) {
-    esp8266.println(command);      //at+cipsend
-    if (esp8266.find(readReplay))  //ok
-    {
-      found = true;
-      break;
-    }
-
-    countTimeCommand++;
+// get sensor data for out
+boolean getSensorDataOut() {
+  // Clears the trigPin condition
+  digitalWrite(TRIG_PIN_OUT, LOW);
+  delayMicroseconds(2);
+  // Sets the trigPin HIGH (ACTIVE) for 10 microseconds
+  digitalWrite(TRIG_PIN_OUT, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN_OUT, LOW);
+  // Reads the echoPin, returns the sound wave travel time in microseconds
+  int duration = pulseIn(ECHO_PIN_OUT, HIGH);
+  // Calculating the distance
+  int distanceCm = duration * 0.034 / 2; // Speed of sound wave divided by 2 (go and back)
+  // Displays the distance on the Serial Monitor
+  // Serial.print("Distance out: ");
+  // Serial.print(distanceCm);
+  // Serial.println(" cm");
+  if (distanceCm > 0 && distanceCm < 50 ) {
+    return true;
   }
-
-  if (found == true) {
-    Serial.println("OYI");
-    countTrueCommand++;
-    countTimeCommand = 0;
-  }
-
-  if (found == false) {
-    Serial.println("Fail");
-    countTrueCommand = 0;
-    countTimeCommand = 0;
-  }
-
-  found = false;
+  return false;
 }
