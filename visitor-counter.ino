@@ -51,7 +51,7 @@ void loop()
   }
 
   if (getSensorDataIn()) {
-    countIn++;
+    countIn+=2;
   }
   Serial.println("In :" + String(countIn));
   delay(2000);
